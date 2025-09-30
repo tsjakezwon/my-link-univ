@@ -113,16 +113,17 @@
     </div>
 
     <script>
-        // ✅ 여기에 위 방법으로 찾은 '스프레드시트 ID'를 붙여넣으세요!
-        const SPREADSHEET_ID = '2PACX-1vSr9BhaorHsJ0DnXCXQL_qeyARh2fWlfOZcLTcbTkxeAxb-1zOogzzP_hAr5uCjLl2g5HhHbDhxQsdB';
+        // ✅ 1단계에서 찾은 진짜 '스프레드시트 ID'를 여기에 붙여넣으세요!
+        const SPREADSHEET_ID = '여기에_스프레드시트_ID를_붙여넣으세요';
 
-        let allData = {}; // { '1-1': [...], '1-2': [...] }
+        let allData = {};
         const state = {
-            level: 0, // 0: semesters, 1: days, 2: courses, 3: links
+            level: 0,
             semester: null,
             day: null,
             course: null,
         };
+        
         const titleEl = document.getElementById('title');
         const backButton = document.getElementById('back-button');
         const views = document.querySelectorAll('.view');
@@ -170,7 +171,7 @@
         function showSemesters() {
             const grid = document.getElementById('semester-grid');
             grid.innerHTML = '';
-            Object.keys(allData).forEach(semester => {
+            Object.keys(allData).sort().forEach(semester => { // 학기 순으로 정렬
                 grid.appendChild(createCard(semester, 'selection', (selected) => {
                     state.level = 1;
                     state.semester = selected;
@@ -222,58 +223,37 @@
 
         async function fetchAllSheets() {
             try {
-                const metaUrl = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?tqx=out:json`;
-                const metaResponse = await fetch(metaUrl);
-                const metaText = await metaResponse.text();
-                const jsonText = metaText.match(/google\.visualization\.Query\.setResponse\((.*)\)/s)[1];
-                const metaData = JSON.parse(jsonText);
-                const sheetNames = metaData.table.cols.map(col => col.label).filter(Boolean);
+                const sheetNamesUrl = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?tqx=out:json`;
+                const response = await fetch(sheetNamesUrl);
+                const text = await response.text();
+                const json = JSON.parse(text.match(/google\.visualization\.Query\.setResponse\((.*)\)/s)[1]);
+                
+                // GID를 가져오는 대신, 시트 이름만 사용합니다.
+                const sheetNames = json.table.rows.map(row => row.c[0].v).filter(Boolean);
 
-                const sheetPromises = sheetNames.map(async (name) => {
-                    const sheetId = metaData.table.rows.find(r => r.c[0].v === name)?.c[1]?.v;
-                    // Note: The above line is a guess. The structure of metaData can be complex.
-                    // A more reliable way is to iterate through rows to find the GID.
-                    let gid = '0'; // Default to first sheet
-                    for (const row of metaData.table.rows) {
-                        if(row.c[0].v === name) {
-                           // This part is tricky as the GID might not be directly available.
-                           // The pub?gid= link is more reliable. Let's pivot.
-                        }
-                    }
+                const sheetPromises = sheetNames.map(async (sheetName) => {
+                    const csvUrl = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(sheetName)}`;
+                    const csvResponse = await fetch(csvUrl);
+                    let csvText = await csvResponse.text();
                     
-                    // The previous method of getting GID from metadata is unreliable.
-                    // Let's use a more robust method by constructing the CSV link directly.
-                    // We assume the sheet names are the semesters we need.
-                    const sheetDataPromises = sheetNames.map(async (sheetName) => {
-                        const csvUrlForSheet = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(sheetName)}`;
-                        const response = await fetch(csvUrlForSheet);
-                        const data = await response.text();
-                         // The gviz CSV output is quoted, so we need a more robust parser.
-                        const rows = data.match(/[^\r\n]+/g).slice(1);
+                    // gviz API는 CSV를 큰따옴표로 감싸므로, 이를 제거하는 과정이 필요합니다.
+                    let rows = csvText.trim().split('\n').slice(1);
+                    let parsedData = rows.map(row => {
+                        let columns = row.slice(1, -1).split('","');
+                        if (columns.length < 4) return null;
                         return {
-                            name: sheetName,
-                            data: rows.map(row => {
-                                const columns = row.slice(1, -1).split('","');
-                                if (columns.length < 4) return null;
-                                return {
-                                    day: columns[0].trim(),
-                                    course: columns[1].trim(),
-                                    link_name: columns[2].trim(),
-                                    url: columns[3].trim()
-                                };
-                            }).filter(Boolean)
+                            day: columns[0].trim(),
+                            course: columns[1].trim(),
+                            link_name: columns[2].trim(),
+                            url: columns[3].trim()
                         };
-                    });
-                     return Promise.all(sheetDataPromises);
-                });
-                
-                const sheetsDataNested = await Promise.all(sheetPromises);
-                const sheetsData = sheetsDataNested[0];
-                
-                sheetsData.forEach(sheet => {
-                    allData[sheet.name] = sheet.data;
+                    }).filter(Boolean);
+                    
+                    allData[sheetName] = parsedData;
                 });
 
+                await Promise.all(sheetPromises);
+                
                 loadingMessage.style.display = 'none';
                 updateView();
 
