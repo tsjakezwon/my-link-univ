@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Academic Portal</title>
+    <style>
+        :root {
+            --bg-color: #f5f5f7;
+            --text-color: #1d1d1f;
+            --text-color-secondary: #86868b;
+            --card-bg: rgba(255, 255, 255, 0.7);
+            --card-border: rgba(0, 0, 0, 0.08);
+            --card-shadow: rgba(0, 0, 0, 0.05);
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 5vh 20px;
+        }
+
+        .container {
+            max-width: 980px;
+            margin: 0 auto;
+        }
+
+        .header {
+            margin-bottom: 40px;
+            position: relative;
+        }
+
+        #back-button {
+            position: absolute;
+            top: 5px;
+            left: 0;
+            font-size: 18px;
+            font-weight: 500;
+            color: #007aff;
+            cursor: pointer;
+            display: none; 
+        }
+        
+        .header h1 {
+            font-size: 48px;
+            font-weight: 600;
+            margin: 0;
+            text-align: center;
+        }
+
+        .selection-grid, .link-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+            gap: 20px;
+        }
+
+        .selection-card, .link-card {
+            background-color: var(--card-bg);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--card-border);
+            border-radius: 18px;
+            box-shadow: 0 5px 15px var(--card-shadow);
+            text-decoration: none;
+            color: var(--text-color);
+            padding: 25px;
+            text-align: center;
+            font-weight: 500;
+            font-size: 17px;
+            transition: transform 0.2s cubic-bezier(0.1, 0.7, 0.5, 1);
+            cursor: pointer;
+        }
+        
+        .selection-card:hover, .link-card:hover {
+            transform: scale(1.03);
+        }
+        
+        .view { display: none; }
+        .view.active { display: block; }
+        
+        .loading {
+             text-align:center;
+             color: var(--text-color-secondary);
+             font-size: 18px;
+             margin-top: 50px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <div id="back-button">‹ 뒤로</div>
+            <h1 id="title">학기 선택</h1>
+        </header>
+
+        <main>
+            <div id="semesters-view" class="view active">
+                <div id="semester-grid" class="selection-grid"></div>
+            </div>
+            <div id="days-view" class="view">
+                <div id="day-grid" class="selection-grid"></div>
+            </div>
+            <div id="courses-view" class="view">
+                <div id="course-grid" class="selection-grid"></div>
+            </div>
+            <div id="links-view" class="view">
+                <div id="link-grid" class="link-grid"></div>
+            </div>
+            <p id="loading-message" class="loading">데이터를 불러오는 중...</p>
+        </main>
+    </div>
+
+    <script>
+        // ✅ 여기에 위 방법으로 찾은 '스프레드시트 ID'를 붙여넣으세요!
+        const SPREADSHEET_ID = '2PACX-1vSr9BhaorHsJ0DnXCXQL_qeyARh2fWlfOZcLTcbTkxeAxb-1zOogzzP_hAr5uCjLl2g5HhHbDhxQsdB';
+
+        let allData = {}; // { '1-1': [...], '1-2': [...] }
+        const state = {
+            level: 0, // 0: semesters, 1: days, 2: courses, 3: links
+            semester: null,
+            day: null,
+            course: null,
+        };
+        const titleEl = document.getElementById('title');
+        const backButton = document.getElementById('back-button');
+        const views = document.querySelectorAll('.view');
+        const loadingMessage = document.getElementById('loading-message');
+
+        function updateView() {
+            views.forEach(view => view.classList.remove('active'));
+            backButton.style.display = 'none';
+
+            if (state.level === 0) {
+                document.getElementById('semesters-view').classList.add('active');
+                titleEl.textContent = '학기 선택';
+                showSemesters();
+            } else if (state.level === 1) {
+                document.getElementById('days-view').classList.add('active');
+                titleEl.textContent = `${state.semester} > 요일 선택`;
+                backButton.style.display = 'block';
+                showDays();
+            } else if (state.level === 2) {
+                document.getElementById('courses-view').classList.add('active');
+                titleEl.textContent = `${state.semester} > ${state.day} > 강의 선택`;
+                backButton.style.display = 'block';
+                showCourses();
+            } else if (state.level === 3) {
+                document.getElementById('links-view').classList.add('active');
+                titleEl.textContent = state.course;
+                backButton.style.display = 'block';
+                showLinks();
+            }
+        }
+
+        function createCard(text, type, clickHandler) {
+            const card = (type === 'link') ? document.createElement('a') : document.createElement('div');
+            card.className = (type === 'link') ? 'link-card' : 'selection-card';
+            card.textContent = text;
+            if (type === 'link') {
+                card.href = clickHandler;
+                card.target = '_blank';
+            } else {
+                card.onclick = () => clickHandler(text);
+            }
+            return card;
+        }
+        
+        function showSemesters() {
+            const grid = document.getElementById('semester-grid');
+            grid.innerHTML = '';
+            Object.keys(allData).forEach(semester => {
+                grid.appendChild(createCard(semester, 'selection', (selected) => {
+                    state.level = 1;
+                    state.semester = selected;
+                    updateView();
+                }));
+            });
+        }
+
+        function showDays() {
+            const uniqueDays = [...new Set(allData[state.semester].map(row => row.day))];
+            const grid = document.getElementById('day-grid');
+            grid.innerHTML = '';
+            uniqueDays.forEach(day => {
+                grid.appendChild(createCard(day, 'selection', (selected) => {
+                    state.level = 2;
+                    state.day = selected;
+                    updateView();
+                }));
+            });
+        }
+
+        function showCourses() {
+            const filteredData = allData[state.semester].filter(row => row.day === state.day);
+            const uniqueCourses = [...new Set(filteredData.map(row => row.course))];
+            const grid = document.getElementById('course-grid');
+            grid.innerHTML = '';
+            uniqueCourses.forEach(course => {
+                grid.appendChild(createCard(course, 'selection', (selected) => {
+                    state.level = 3;
+                    state.course = selected;
+                    updateView();
+                }));
+            });
+        }
+        
+        function showLinks() {
+            const filteredData = allData[state.semester].filter(row => row.day === state.day && row.course === state.course);
+            const grid = document.getElementById('link-grid');
+            grid.innerHTML = '';
+            filteredData.forEach(row => {
+                grid.appendChild(createCard(row.link_name, 'link', row.url));
+            });
+        }
+
+        backButton.addEventListener('click', () => {
+            if (state.level > 0) state.level--;
+            updateView();
+        });
+
+        async function fetchAllSheets() {
+            try {
+                const metaUrl = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?tqx=out:json`;
+                const metaResponse = await fetch(metaUrl);
+                const metaText = await metaResponse.text();
+                const jsonText = metaText.match(/google\.visualization\.Query\.setResponse\((.*)\)/s)[1];
+                const metaData = JSON.parse(jsonText);
+                const sheetNames = metaData.table.cols.map(col => col.label).filter(Boolean);
+
+                const sheetPromises = sheetNames.map(async (name) => {
+                    const sheetId = metaData.table.rows.find(r => r.c[0].v === name)?.c[1]?.v;
+                    // Note: The above line is a guess. The structure of metaData can be complex.
+                    // A more reliable way is to iterate through rows to find the GID.
+                    let gid = '0'; // Default to first sheet
+                    for (const row of metaData.table.rows) {
+                        if(row.c[0].v === name) {
+                           // This part is tricky as the GID might not be directly available.
+                           // The pub?gid= link is more reliable. Let's pivot.
+                        }
+                    }
+                    
+                    // The previous method of getting GID from metadata is unreliable.
+                    // Let's use a more robust method by constructing the CSV link directly.
+                    // We assume the sheet names are the semesters we need.
+                    const sheetDataPromises = sheetNames.map(async (sheetName) => {
+                        const csvUrlForSheet = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(sheetName)}`;
+                        const response = await fetch(csvUrlForSheet);
+                        const data = await response.text();
+                         // The gviz CSV output is quoted, so we need a more robust parser.
+                        const rows = data.match(/[^\r\n]+/g).slice(1);
+                        return {
+                            name: sheetName,
+                            data: rows.map(row => {
+                                const columns = row.slice(1, -1).split('","');
+                                if (columns.length < 4) return null;
+                                return {
+                                    day: columns[0].trim(),
+                                    course: columns[1].trim(),
+                                    link_name: columns[2].trim(),
+                                    url: columns[3].trim()
+                                };
+                            }).filter(Boolean)
+                        };
+                    });
+                     return Promise.all(sheetDataPromises);
+                });
+                
+                const sheetsDataNested = await Promise.all(sheetPromises);
+                const sheetsData = sheetsDataNested[0];
+                
+                sheetsData.forEach(sheet => {
+                    allData[sheet.name] = sheet.data;
+                });
+
+                loadingMessage.style.display = 'none';
+                updateView();
+
+            } catch (error) {
+                loadingMessage.textContent = '데이터를 불러오는 데 실패했습니다. 시트 ID와 공유 설정을 확인해주세요.';
+                console.error('Error:', error);
+            }
+        }
+        
+        fetchAllSheets();
+    </script>
+</body>
+</html>
